@@ -9,6 +9,9 @@ var SHELL = [
   './js/detector.js',
   './js/store.js',
   './js/recorder.js',
+  './js/simdemo.js',
+  './js/airspace.js',
+  './js/basemap.js',
   './js/app.js',
   './manifest.webmanifest'
 ];

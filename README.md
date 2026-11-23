@@ -62,8 +62,10 @@ sw.js, manifest.webmanifest   PWA/Offline
 - GPS-Höhe ist ungenau – die T&G-Erkennung stützt sich daher primär auf das Geschwindigkeitsprofil und nur sekundär auf die Höhe.
 - Ein manueller "T&G +1"-Button existiert als Fallback während des Flugs; die erkannten Ereignisse landen automatisch im Flugbuch.
 
-## Deployment (GitHub Pages) – App aufs Handy
+## Luftraumdaten (DAeC OpenAir) & Basiskarte
 
-1. Repo → *Settings → Pages → Source: „Deploy from a branch“* → Branch `vibe/flugbuch-app-846d29` (bzw. `main` nach Merge), Folder `/ (root)` → Save.
-2. App erreichbar unter: `https://baumannmax-seb.github.io/Flugbuch/` (HTTPS – Voraussetzung für GPS auf dem Handy).
-3. Am Handy öffnen → iOS Safari: *Teilen → „Zum Home-Bildschirm“*; Android Chrome: *Menü → „App installieren“*. Danach offline nutzbar, GPS funktioniert.
+- Unter **Daten → Luftraum & Basiskarte** die DAeC-Datei laden: entweder direkt online („DAeC OpenAir laden“, lädt `2026_09_Airspace_Germany_OA1.txt`) oder als lokale `.txt` (OpenAir-Format, z. B. von daec.de heruntergeladen).
+- `js/airspace.js` parst OpenAir (`AC/AN/AH/AL/V X=/DC/DP/DA/DB`), baut Polygone/Kreise und prüft per Point-in-Polygon + Höhenband (FL/ft/GND/UNL), ob die aktuelle Position in einem Gebiet liegt.
+- Auf der Karte (Live + Flugdetail) werden Gebiete farbcodiert eingezeichnet (R/D/P rot, C/CTR magenta, TMZ/RMZ/TRA/TSA orange, G grün). Beim Einflug in R/D/C/CTR/TMZ/RMZ: Banner + Vibration + Toast.
+- **Basiskarte**: optional OpenStreetMap-Kacheln (© OpenStreetMap-Mitwirkende), nur wenn online; offline zeichnet die App Track + Luftraum als Vektor (Web-Mercator-Projektion, `js/basemap.js`).
+- Hinweis: DA/DB-Bögen werden als Sehnen vereinfacht; AGL-Grenzen werden näherungsweise als MSL behandelt. Luftraumdaten lokal gespeichert (localStorage), funktionieren also offline. AIRAC-Zyklus beachten – Datei regelmäßig aktualisieren.

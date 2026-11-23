@@ -6,7 +6,7 @@
   var recorder = new Recorder.Recorder({
     settings: function () { return Store.getSettings(); },
     onStart: function () { toast('GPS-Aufzeichnung gestartet'); render(); startLiveTick(); },
-    onPoint: function () { scheduleLiveDraw(); },
+    onPoint: function (pt) { scheduleLiveDraw(); checkAirspace(pt); },
     onEvent: function (e) {
       if (e.type === 'flightstart') toast('✈️ Flug automatisch erkannt (Auto-Start)');
       if (e.type === 'touchandgo') toast('🟠 Touch & Go erkannt (' + (Detector.summarize(recorder.det.events).touchAndGos + recorder.manualTg) + ')');
@@ -29,6 +29,8 @@
   var liveTick = null;
   var drawPending = false;
   var demoTimer = null;
+  var lastAirKey = '';
+  Airspace.load();
   function startLiveTick() {
     stopLiveTick();
     liveTick = setInterval(function () { if (recorder.active) renderLiveNumbers(); }, 1000);
@@ -168,6 +170,7 @@
     var s = Detector.summarize(recorder.det ? recorder.det.events : []);
     return '<div class="live-banner"><span class="live-dot"></span><strong>Aufzeichnung läuft</strong>' +
       '<span class="hint" id="live-state">' + (recorder.det && recorder.det.state === 'CANDIDATE' ? 'Aufsetzen erkannt…' : (recorder.det && recorder.det.flightStarted ? 'in der Luft' : 'am Boden / rollend')) + '</span></div>' +
+      '<div id="as-banner" class="hint"></div>' +
       '<div class="card"><div class="statgrid">' +
       '<div class="stat"><div class="v mono" id="lv-time">00:00</div><div class="l">Flugzeit</div></div>' +
       '<div class="stat"><div class="v mono" id="lv-speed">0</div><div class="l">km/h</div></div>' +
@@ -209,6 +212,32 @@
     var ul = el('live-events');
     if (ul) ul.innerHTML = evs.slice().reverse().map(eventLiHtml).join('');
   }
+  function altLabel(a) {
+    var al = a.al == null ? 0 : Math.round(a.al);
+    var ah = a.ah == null || a.ah >= 1e8 ? 'UNL' : Math.round(a.ah);
+    return al + '–' + ah + ' m';
+  }
+  function checkAirspace(pt) {
+    var st = Store.getSettings();
+    var el = document.getElementById('as-banner');
+    if (!st.airspaceWarn || !Airspace.areas.length) { if (el) { el.textContent = ''; el.className = 'hint'; } return; }
+    var hits = Airspace.check(pt.lat, pt.lon, pt.alt != null ? pt.alt : null);
+    var top = hits[0] || null;
+    if (el) {
+      if (top) {
+        el.textContent = '⚠ Luftraum: ' + top.name + ' (' + top.cls + ', ' + altLabel(top) + ')';
+        el.className = Airspace.warnLevel(top.cls) >= 3 ? 'as-warn strong' : 'as-warn';
+      } else { el.textContent = ''; el.className = 'hint'; }
+    }
+    var key = top ? top.cls + ':' + top.name : '';
+    if (key !== lastAirKey) {
+      lastAirKey = key;
+      if (top && Airspace.warnLevel(top.cls) >= 2) {
+        toast('⚠ Einflug: ' + top.name + ' (' + top.cls + ')');
+        try { if (navigator.vibrate) navigator.vibrate([150, 80, 150]); } catch (_) {}
+      }
+    }
+  }
   function eventLiHtml(e) {
     var labels = { takeoff: '🛫 Start', touchandgo: '🟠 Touch & Go', landing: '🟢 Landung', flightstart: '▶ Auto-Start', flightstop: '⏹ Auto-Stop', manualtg: '🟠 T&G manuell' };
     var cls = { touchandgo: 'tg', manualtg: 'tg', landing: 'ldg', takeoff: 'to' }[e.type] || '';
@@ -219,6 +248,52 @@
     var prof = document.getElementById('live-profile');
     if (map) drawMap(map, recorder.points, recorder.det ? recorder.det.events : []);
     if (prof) drawProfile(prof, recorder.points);
+  }
+  function mercY(lat) { return 180 / Math.PI * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360)); }
+  function classColor(cls) {
+    var c = (cls || '').toUpperCase();
+    if (c === 'R' || c === 'D' || c === 'P') return '255,80,80';
+    if (c === 'C' || c === 'CTR') return '220,90,220';
+    if (c === 'TMZ' || c === 'RMZ' || c === 'TRA' || c === 'TSA') return '255,176,32';
+    if (c === 'G') return '61,220,132';
+    return '140,160,190';
+  }
+  function drawAirspace(ctx, view) {
+    var areas = Airspace.areas;
+    for (var i = 0; i < areas.length; i++) {
+      var a = areas[i];
+      var ring = a.ring;
+      if (!ring || ring.length < 3) continue;
+      var rMinLat = Infinity, rMaxLat = -Infinity, rMinLon = Infinity, rMaxLon = -Infinity;
+      for (var j = 0; j < ring.length; j++) {
+        rMinLat = Math.min(rMinLat, ring[j].lat); rMaxLat = Math.max(rMaxLat, ring[j].lat);
+        rMinLon = Math.min(rMinLon, ring[j].lon); rMaxLon = Math.max(rMaxLon, ring[j].lon);
+      }
+      if (rMaxLat < view.minLat || rMinLat > view.maxLat || rMaxLon < view.minLon || rMinLon > view.maxLon) continue;
+      var col = classColor(a.cls);
+      ctx.beginPath();
+      for (var k = 0; k < ring.length; k++) {
+        var x = view.X(ring[k].lon), y = view.Y(ring[k].lat);
+        if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(' + col + ',.10)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(' + col + ',.55)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      var cx = 0, cy = 0;
+      for (var m = 0; m < ring.length; m++) { cx += ring[m].lon; cy += ring[m].lat; }
+      cx /= ring.length; cy /= ring.length;
+      var lx = view.X(cx), ly = view.Y(cy);
+      if (lx > 4 && lx < view.w - 4 && ly > 10 && ly < view.h - 4) {
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = 'rgba(' + col + ',.95)';
+        ctx.fillText((a.name || a.cls) + ' ' + a.cls, lx + 3, ly - 3);
+      }
+    }
   }
   function drawMap(canvas, pts, events) {
     var ctx = canvas.getContext('2d');
@@ -239,21 +314,30 @@
       minLon = Math.min(minLon, p.lon); maxLon = Math.max(maxLon, p.lon);
     });
     var pad = 26;
-    var midLat = (minLat + maxLat) / 2;
-    var cosLat = Math.cos(midLat * Math.PI / 180);
-    var spanLon = Math.max(maxLon - minLon, 1e-5) * cosLat;
-    var spanLat = Math.max(maxLat - minLat, 1e-5);
-    var s = Math.min((w - 2 * pad) / spanLon, (h - 2 * pad) / spanLat);
-    var ox = w / 2 - s * (minLon + maxLon) / 2 * cosLat;
-    var oy = h / 2 + s * (minLat + maxLat) / 2;
-    var X = function (lon) { return ox + s * lon * cosLat; };
-    var Y = function (lat) { return oy - s * lat; };
+    var spanX = Math.max(maxLon - minLon, 1e-5);
+    var spanY = Math.max(mercY(maxLat) - mercY(minLat), 1e-5);
+    var s = Math.min((w - 2 * pad) / spanX, (h - 2 * pad) / spanY);
+    var ox = w / 2 - s * (minLon + maxLon) / 2;
+    var oy = h / 2 + s * (mercY(minLat) + mercY(maxLat)) / 2;
+    var X = function (lon) { return ox + s * lon; };
+    var Y = function (lat) { return oy - s * mercY(lat); };
+    var view = { X: X, Y: Y, w: w, h: h, minLon: minLon, maxLon: maxLon, minLat: minLat, maxLat: maxLat };
+    var st = Store.getSettings();
+    if (st.basemap && typeof navigator !== 'undefined' && navigator.onLine !== false && window.Basemap) {
+      Basemap.draw(ctx, view, function () {
+        if (!canvas._tileRedraw) {
+          canvas._tileRedraw = true;
+          setTimeout(function () { canvas._tileRedraw = false; drawMap(canvas, pts, events); }, 300);
+        }
+      });
+    }
     ctx.strokeStyle = 'rgba(120,140,170,.15)';
     ctx.lineWidth = 1;
     for (var g = 1; g < 4; g++) {
       ctx.beginPath(); ctx.moveTo(0, h * g / 4); ctx.lineTo(w, h * g / 4); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(w * g / 4, 0); ctx.lineTo(w * g / 4, h); ctx.stroke();
     }
+    if (st.airspaceMap && Airspace.areas.length) drawAirspace(ctx, view);
     ctx.beginPath();
     pts.forEach(function (p, i) { if (i) ctx.lineTo(X(p.lon), Y(p.lat)); else ctx.moveTo(X(p.lon), Y(p.lat)); });
     ctx.strokeStyle = '#4da3ff'; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
@@ -541,6 +625,17 @@
       '<label class="f"><span>Länge</span><input id="ca-lon" type="number" step="0.0001" placeholder="11.2881"></label>' +
       '</div><button class="btn secondary" id="ca-add">Platz hinzufügen</button>' +
       '<p class="hint">Alternativ: aktueller GPS-Standort als Platz übernehmen. <button class="btn small secondary" id="ca-here">Hier als Platz</button></p></div>' +
+      '<div class="card"><h2>Luftraum &amp; Basiskarte</h2>' +
+      '<p class="hint" id="as-status">' + (Airspace.areas.length ? Airspace.areas.length + ' Gebiete geladen (OpenAir, DAeC)' : 'Keine Luftraumdaten geladen – lade die DAeC OpenAir-Datei (online) oder eine lokale .txt') + '</p>' +
+      '<div class="row">' +
+      '<button class="btn secondary" id="as-fetch">⬇ DAeC OpenAir laden (online)</button>' +
+      '<label class="btn secondary" style="cursor:pointer">⬆ Lokale .txt laden<input type="file" id="as-file" accept=".txt,.sua,.openair,text/plain" style="display:none"></label>' +
+      '<button class="btn small danger" id="as-clear">Leeren</button>' +
+      '</div>' +
+      '<label class="f"><span><input type="checkbox" id="st-airmap"' + (s.airspaceMap !== false ? ' checked' : '') + ' style="width:auto"> Luftraumgebiete auf der Karte anzeigen</span></label>' +
+      '<label class="f"><span><input type="checkbox" id="st-airwarn"' + (s.airspaceWarn !== false ? ' checked' : '') + ' style="width:auto"> Warnung beim Einflug in R/D/C/CTR/TMZ/RMZ (Banner + Vibration)</span></label>' +
+      '<label class="f"><span><input type="checkbox" id="st-basemap"' + (s.basemap !== false ? ' checked' : '') + ' style="width:auto"> Basiskarte OpenStreetMap laden (nur online; © OpenStreetMap-Mitwirkende)</span></label>' +
+      '<p class="hint">Offline zeichnet die App den Track als Vektor – Luftraumgebiete kommen aus den lokal geladenen Daten und funktionieren ohne Netz.</p></div>' +
       '<div class="card"><h2>Export / Import</h2><div class="row">' +
       '<button class="btn secondary" id="exp-json">⬇ JSON exportieren</button>' +
       '<button class="btn secondary" id="exp-csv">⬇ CSV exportieren</button>' +
@@ -556,10 +651,37 @@
         takeoffKmh: +$('#st-takeoff').value || 83,
         stopConfirmSec: +$('#st-stopsec').value || 30,
         touchGroundSec: +$('#st-tgsec').value || 22,
-        nightAuto: $('#st-night').checked
+        nightAuto: $('#st-night').checked,
+        airspaceMap: $('#st-airmap').checked,
+        airspaceWarn: $('#st-airwarn').checked,
+        basemap: $('#st-basemap').checked
       });
       toast('Einstellungen gespeichert');
     };
+    $('#as-fetch').onclick = function () {
+      toast('Lade DAeC OpenAir (2026_09)…');
+      fetch('https://www.daec.de/media/files/Dateien/Fachbereiche/Luftraum_und_Flugsicherheit/2026_09_Airspace_Germany_OA1.txt')
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+        .then(function (t) {
+          var n = Airspace.setFromOpenAir(t).length;
+          toast(n + ' Luftraumgebiete geladen');
+          renderDaten();
+        })
+        .catch(function (e) { toast('Download fehlgeschlagen (' + e.message + ') – bitte lokale .txt laden'); });
+    };
+    $('#as-file').onchange = function (e) {
+      var f = e.target.files[0];
+      if (!f) return;
+      var r = new FileReader();
+      r.onload = function () {
+        var n = Airspace.setFromOpenAir(String(r.result)).length;
+        toast(n + ' Luftraumgebiete geladen');
+        renderDaten();
+      };
+      r.readAsText(f);
+      e.target.value = '';
+    };
+    $('#as-clear').onclick = function () { Airspace.clear(); toast('Luftraumdaten gelöscht'); renderDaten(); };
     $$('#view-daten [data-cdel]').forEach(function (b) {
       b.onclick = function () {
         var c = Store.getSettings().customAirports.slice();

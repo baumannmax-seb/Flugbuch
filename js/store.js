@@ -46,7 +46,10 @@
     touchGroundSec: 22,
     defaultAircraft: null,
     customAirports: [],
-    nightAuto: true
+    nightAuto: true,
+    airspaceMap: true,
+    airspaceWarn: true,
+    basemap: true
   }, load(K.settings, {}));
   var seq = load(K.seq, 1);
   function nextNo() { var n = seq; seq += 1; save(K.seq, seq); return n; }
