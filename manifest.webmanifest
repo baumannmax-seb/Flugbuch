@@ -1,0 +1,19 @@
+{
+  "name": "PilotLog – Digitales Flugbuch",
+  "short_name": "PilotLog",
+  "description": "Digitales Flugbuch mit GPS-Aufzeichnung und automatischer Touch-&-Go-Erkennung",
+  "lang": "de",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='96' fill='%230b1220'/><text x='256' y='360' font-size='300' text-anchor='middle'>✈️</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

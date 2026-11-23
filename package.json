@@ -1,0 +1,10 @@
+{
+  "name": "pilotlog",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Digitales Flugbuch (PWA) mit GPS-Tracking und automatischer Touch-&-Go-Erkennung",
+  "scripts": {
+    "test": "node tests/detector.test.js && node tests/recorder.test.js && node tests/simdemo.test.js",
+    "start": "python3 -m http.server 8000"
+  }
+}
