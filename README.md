@@ -69,3 +69,10 @@ sw.js, manifest.webmanifest   PWA/Offline
 - Auf der Karte (Live + Flugdetail) werden Gebiete farbcodiert eingezeichnet (R/D/P rot, C/CTR magenta, TMZ/RMZ/TRA/TSA orange, G grün). Beim Einflug in R/D/C/CTR/TMZ/RMZ: Banner + Vibration + Toast.
 - **Basiskarte**: optional OpenStreetMap-Kacheln (© OpenStreetMap-Mitwirkende), nur wenn online; offline zeichnet die App Track + Luftraum als Vektor (Web-Mercator-Projektion, `js/basemap.js`).
 - Hinweis: DA/DB-Bögen werden als Sehnen vereinfacht; AGL-Grenzen werden näherungsweise als MSL behandelt. Luftraumdaten lokal gespeichert (localStorage), funktionieren also offline. AIRAC-Zyklus beachten – Datei regelmäßig aktualisieren.
+
+## Vollbild-Moving-Map & eigene Kartendaten
+
+- Während der Aufzeichnung: **⛶ Vollbild** auf der Live-Karte → Moving Map folgt dem Flugzeug (eigenes Dreieck mit Kurs), Zoom mit **+/−** (Z8–Z17, wird gespeichert), Maßstab unten links, Luftraum + Kacheln eingeblendet. Beenden mit ESC oder erneut ⛶.
+- **Eigene Kacheln laden** (Daten → Karten-Kacheln): entweder einen **Kachel-Ordner** (`…/z/x/y.png`, per Ordner-Picker) oder eine **MBTiles-Datei** (SQLite; TMS-Zeilen werden korrekt nach XYZ umgerechnet). MBTiles braucht einmalig Internet (sql.js-WASM von CDN). Kacheln landen in der IndexedDB des Geräts und sind danach **offline** nutzbar.
+- Kachel-Quelle: `auto` (lokal zuerst, OSM online als Fallback), `local` (nur offline), `osm` (nur online).
+- **OpenAIP**: API-Key unter Daten → OpenAIP lokal speichern (bleibt im Browser des Geräts). „Flugplätze laden“ merged OpenAIP-Airports in die eigenen Plätze (ICAO-Autoerkennung), „Luftraum laden“ merged OpenAIP-Airspaces (GeoJSON → Polygone, FL/ft-Grenzen) mit den DAeC-Daten. Endpunkte: `api.core.openaip.net/api/airports`, `/api/airspaces?country=DE`, Key via Header `x-openaip-api-key`. Datenquelle: openaip.net.

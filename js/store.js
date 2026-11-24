@@ -49,7 +49,10 @@
     nightAuto: true,
     airspaceMap: true,
     airspaceWarn: true,
-    basemap: true
+    basemap: true,
+    tileSource: 'auto',
+    mmZoom: 13,
+    openaipKey: ''
   }, load(K.settings, {}));
   var seq = load(K.seq, 1);
   function nextNo() { var n = seq; seq += 1; save(K.seq, seq); return n; }

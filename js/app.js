@@ -30,6 +30,7 @@
   var drawPending = false;
   var demoTimer = null;
   var lastAirKey = '';
+  var mapFullscreen = false;
   Airspace.load();
   function startLiveTick() {
     stopLiveTick();
@@ -146,7 +147,7 @@
     };
     var bd = $('#btn-demo');
     if (bd) bd.onclick = startDemo;
-    if (recorder.active) { renderLiveNumbers(); renderLiveCharts(); startLiveTick(); }
+    if (recorder.active) { renderLiveNumbers(); renderLiveCharts(); startLiveTick(); attachLiveMapButtons(); }
   }
   function stat(val, label, sub) {
     return '<div class="stat"><div class="v">' + esc(val) + '</div><div class="l">' + esc(label) +
@@ -184,7 +185,11 @@
       '<button class="btn secondary" id="btn-tg">🟠 T&amp;G manuell +1</button>' +
       '<button class="btn secondary" id="btn-discard">Verwerfen</button>' +
       '</div></div>' +
-      '<div class="card"><h2>Live-Karte</h2><canvas id="live-map" class="chart" style="height:280px"></canvas></div>' +
+      '<div class="card"><div class="row"><h2 class="grow">Live-Karte</h2>' +
+      '<button class="btn small secondary" id="btn-zoom-out" title="Zoom raus">−</button>' +
+      '<button class="btn small secondary" id="btn-zoom-in" title="Zoom rein">+</button>' +
+      '<button class="btn small secondary" id="btn-fs" title="Vollbild / Moving Map">⛶ Vollbild</button></div>' +
+      '<div class="mapwrap" id="live-mapwrap"><canvas id="live-map" class="chart" style="height:280px"></canvas></div></div>' +
       '<div class="card"><h2>Höhen- &amp; Geschwindigkeitsprofil</h2><canvas id="live-profile" class="chart" style="height:180px"></canvas></div>' +
       '<div class="card"><h2>Ereignisse</h2><ul class="events" id="live-events"></ul></div>';
   }
@@ -246,8 +251,30 @@
   function renderLiveCharts() {
     var map = document.getElementById('live-map');
     var prof = document.getElementById('live-profile');
-    if (map) drawMap(map, recorder.points, recorder.det ? recorder.det.events : []);
-    if (prof) drawProfile(prof, recorder.points);
+    if (map) {
+      if (mapFullscreen) drawMovingMap(map, recorder.points, recorder.det ? recorder.det.events : []);
+      else drawMap(map, recorder.points, recorder.det ? recorder.det.events : []);
+    }
+    if (prof && !mapFullscreen) drawProfile(prof, recorder.points);
+  }
+  function attachLiveMapButtons() {
+    var fs = document.getElementById('btn-fs');
+    if (fs) fs.onclick = function () {
+      var wrap = document.getElementById('live-mapwrap');
+      if (!wrap) return;
+      if (document.fullscreenElement) { document.exitFullscreen(); return; }
+      (wrap.requestFullscreen || wrap.webkitRequestFullscreen || function () {}).call(wrap);
+    };
+    var zi = document.getElementById('btn-zoom-in');
+    var zo = document.getElementById('btn-zoom-out');
+    if (zi) zi.onclick = function () { bumpZoom(1); };
+    if (zo) zo.onclick = function () { bumpZoom(-1); };
+  }
+  function bumpZoom(d) {
+    var s = Store.getSettings();
+    var z = Math.max(8, Math.min(17, (s.mmZoom || 13) + d));
+    Store.saveSettings({ mmZoom: z });
+    renderLiveCharts();
   }
   function mercY(lat) { return 180 / Math.PI * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360)); }
   function classColor(cls) {
@@ -323,11 +350,15 @@
     var Y = function (lat) { return oy - s * mercY(lat); };
     var view = { X: X, Y: Y, w: w, h: h, minLon: minLon, maxLon: maxLon, minLat: minLat, maxLat: maxLat };
     var st = Store.getSettings();
-    if (st.basemap && typeof navigator !== 'undefined' && navigator.onLine !== false && window.Basemap) {
-      Basemap.draw(ctx, view, function () {
-        if (!canvas._tileRedraw) {
-          canvas._tileRedraw = true;
-          setTimeout(function () { canvas._tileRedraw = false; drawMap(canvas, pts, events); }, 300);
+    if (st.basemap && window.Basemap) {
+      Basemap.draw(ctx, view, {
+        source: st.tileSource || 'auto',
+        zoom: view.zoom,
+        onLoaded: function () {
+          if (!canvas._tileRedraw) {
+            canvas._tileRedraw = true;
+            setTimeout(function () { canvas._tileRedraw = false; drawMap(canvas, pts, events); }, 300);
+          }
         }
       });
     }
@@ -351,6 +382,79 @@
       else if (e.type === 'takeoff') dot(ctx, X(e.lon), Y(e.lat), '#4da3ff');
     });
     ctx.fillStyle = '#8fa1bd'; ctx.font = '12px sans-serif';
+    ctx.fillText('N ↑', w - 22, 18);
+  }
+  function invMercY(my) { return 180 / Math.PI * (2 * Math.atan(Math.exp(my * Math.PI / 180)) - Math.PI / 2); }
+  function drawMovingMap(canvas, pts, events) {
+    var ctx = canvas.getContext('2d');
+    var dpr = window.devicePixelRatio || 1;
+    var w = canvas.clientWidth, h = canvas.clientHeight;
+    if (!w || !h) return;
+    if (canvas.width !== Math.round(w * dpr)) { canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    var c = pts && pts.length ? pts[pts.length - 1] : null;
+    if (!c) {
+      ctx.fillStyle = '#8fa1bd'; ctx.font = '13px sans-serif';
+      ctx.fillText('Warte auf GPS…', 12, 22);
+      return;
+    }
+    var st = Store.getSettings();
+    var z = st.mmZoom || 13;
+    var cosLat = Math.cos(c.lat * Math.PI / 180);
+    var mpp = 156543.03392 * cosLat / Math.pow(2, z);
+    var halfLonDeg = mpp * (w / 2) / (111320 * cosLat);
+    var s = (w / 2) / halfLonDeg;
+    var ox = w / 2 - s * c.lon;
+    var oy = h / 2 + s * mercY(c.lat);
+    var X = function (lon) { return ox + s * lon; };
+    var Y = function (lat) { return oy - s * mercY(lat); };
+    var minLon = c.lon - halfLonDeg, maxLon = c.lon + halfLonDeg;
+    var minLat = invMercY((oy - h) / s), maxLat = invMercY(oy / s);
+    var view = { X: X, Y: Y, w: w, h: h, minLon: minLon, maxLon: maxLon, minLat: minLat, maxLat: maxLat, zoom: z };
+    if (st.basemap && window.Basemap) {
+      Basemap.draw(ctx, view, {
+        source: st.tileSource || 'auto',
+        zoom: z,
+        onLoaded: function () {
+          if (!canvas._tileRedraw) {
+            canvas._tileRedraw = true;
+            setTimeout(function () { canvas._tileRedraw = false; drawMovingMap(canvas, pts, events); }, 300);
+          }
+        }
+      });
+    }
+    if (st.airspaceMap && Airspace.areas.length) drawAirspace(ctx, view);
+    if (pts && pts.length > 1) {
+      ctx.beginPath();
+      pts.forEach(function (p, i) { if (i) ctx.lineTo(X(p.lon), Y(p.lat)); else ctx.moveTo(X(p.lon), Y(p.lat)); });
+      ctx.strokeStyle = '#4da3ff'; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
+    }
+    (events || []).forEach(function (e) {
+      if (e.lat == null) return;
+      if (e.type === 'touchandgo') dot(ctx, X(e.lon), Y(e.lat), '#ffb020');
+      else if (e.type === 'landing') square(ctx, X(e.lon), Y(e.lat), '#3ddc84');
+    });
+    var hdg = c.heading != null ? c.heading * Math.PI / 180 : 0;
+    ctx.save();
+    ctx.translate(X(c.lon), Y(c.lat));
+    ctx.rotate(hdg);
+    ctx.beginPath();
+    ctx.moveTo(0, -11); ctx.lineTo(7, 8); ctx.lineTo(0, 4); ctx.lineTo(-7, 8);
+    ctx.closePath();
+    ctx.fillStyle = '#ffb020';
+    ctx.fill();
+    ctx.strokeStyle = '#04121f'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.restore();
+    var nice = [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
+    var barM = nice[0];
+    for (var i = 0; i < nice.length; i++) { if (nice[i] / mpp <= w / 4) barM = nice[i]; }
+    var barPx = barM / mpp;
+    ctx.strokeStyle = '#e8eef7'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(14, h - 16); ctx.lineTo(14 + barPx, h - 16); ctx.stroke();
+    ctx.fillStyle = '#e8eef7'; ctx.font = '11px sans-serif';
+    ctx.fillText(barM >= 1000 ? (barM / 1000) + ' km' : barM + ' m', 14, h - 22);
+    ctx.fillText('Z' + z, w - 34, h - 8);
     ctx.fillText('N ↑', w - 22, 18);
   }
   function marker(ctx, x, y, color, label) {
@@ -625,6 +729,26 @@
       '<label class="f"><span>Länge</span><input id="ca-lon" type="number" step="0.0001" placeholder="11.2881"></label>' +
       '</div><button class="btn secondary" id="ca-add">Platz hinzufügen</button>' +
       '<p class="hint">Alternativ: aktueller GPS-Standort als Platz übernehmen. <button class="btn small secondary" id="ca-here">Hier als Platz</button></p></div>' +
+      '<div class="card"><h2>Karten-Kacheln (Moving Map / Vollbild)</h2>' +
+      '<p class="hint" id="tile-status">Lokale Kacheln: –</p>' +
+      '<label class="f"><span>Kachel-Quelle</span><select id="st-tilesource">' +
+      [['auto', ' Lokal + OSM online (Fallback)'], ['local', 'Nur lokale Kacheln (offline)'], ['osm', 'Nur OSM online']].map(function (o) {
+        return '<option value="' + o[0] + '"' + ((s.tileSource || 'auto') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+      }).join('') + '</select></label>' +
+      '<div class="row">' +
+      '<label class="btn secondary" style="cursor:pointer">⬆ Kachel-Ordner (z/x/y.png)<input type="file" id="tile-folder" webkitdirectory directory multiple style="display:none"></label>' +
+      '<label class="btn secondary" style="cursor:pointer">⬆ MBTiles (.mbtiles)<input type="file" id="tile-mbtiles" accept=".mbtiles,.sqlite,.db" style="display:none"></label>' +
+      '<button class="btn small danger" id="tile-clear">Kacheln löschen</button>' +
+      '</div>' +
+      '<p class="hint">Kacheln landen nur im Browser des Geräts (IndexedDB) und sind danach offline verfügbar – z. B. exportierte MBTiles von openflightmaps oder eigener Export. MBTiles braucht einmalig Internet (sql.js-WASM von CDN).</p></div>' +
+      '<div class="card"><h2>OpenAIP (API-Key lokal gespeichert)</h2>' +
+      '<label class="f"><span>OpenAIP API-Key (wird nur lokal im Browser gespeichert)</span><input id="oa-key" type="password" placeholder="x-openaip-api-key" value="' + esc(s.openaipKey || '') + '"></label>' +
+      '<div class="row">' +
+      '<select id="oa-country">' + ['DE', 'AT', 'CH', 'FR', 'NL', 'DK', 'PL', 'CZ', 'IT'].map(function (c) { return '<option>' + c + '</option>'; }).join('') + '</select>' +
+      '<button class="btn secondary" id="oa-airports">Flugplätze laden</button>' +
+      '<button class="btn secondary" id="oa-airspaces">Luftraum laden</button>' +
+      '</div>' +
+      '<p class="hint">Lädt Flugplätze (werden zu „Eigene Flugplätze“ gemerged) und Luftraumgebiete (werden mit den DAeC-Daten zusammengeführt) von api.core.openaip.net. Datenquelle: <a href="https://www.openaip.net" target="_blank" rel="noopener">OpenAIP</a>.</p></div>' +
       '<div class="card"><h2>Luftraum &amp; Basiskarte</h2>' +
       '<p class="hint" id="as-status">' + (Airspace.areas.length ? Airspace.areas.length + ' Gebiete geladen (OpenAir, DAeC)' : 'Keine Luftraumdaten geladen – lade die DAeC OpenAir-Datei (online) oder eine lokale .txt') + '</p>' +
       '<div class="row">' +
@@ -682,6 +806,64 @@
       e.target.value = '';
     };
     $('#as-clear').onclick = function () { Airspace.clear(); toast('Luftraumdaten gelöscht'); renderDaten(); };
+    Tiles.count().then(function (n) { var el2 = document.getElementById('tile-status'); if (el2) el2.textContent = 'Lokale Kacheln: ' + n; });
+    $('#st-tilesource').onchange = function () { Store.saveSettings({ tileSource: this.value }); toast('Kachel-Quelle gespeichert'); };
+    $('#tile-folder').onchange = function (e) {
+      var files = e.target.files;
+      if (!files || !files.length) return;
+      toast('Importiere ' + files.length + ' Dateien…');
+      Tiles.importTileFolder(files).then(function (n) {
+        toast(n + ' Kacheln gespeichert (offline verfügbar)');
+        renderDaten();
+      }).catch(function (err) { toast('Fehler: ' + err.message); });
+      e.target.value = '';
+    };
+    $('#tile-mbtiles').onchange = function (e) {
+      var f = e.target.files[0];
+      if (!f) return;
+      toast('Lade MBTiles ' + f.name + '…');
+      f.arrayBuffer()
+        .then(function (ab) { return Tiles.loadSqlJs().then(function (SQL) { return Tiles.importMbtiles(ab, SQL); }); })
+        .then(function (n) { toast(n + ' Kacheln aus MBTiles gespeichert'); renderDaten(); })
+        .catch(function (err) { toast('MBTiles-Import fehlgeschlagen: ' + err.message); });
+      e.target.value = '';
+    };
+    $('#tile-clear').onclick = function () { Tiles.clear().then(function () { toast('Kacheln gelöscht'); renderDaten(); }); };
+    $('#oa-airports').onclick = function () {
+      var key = $('#oa-key').value.trim();
+      if (!key) { toast('Bitte OpenAIP API-Key eintragen'); return; }
+      Store.saveSettings({ openaipKey: key });
+      var country = $('#oa-country').value;
+      toast('Lade Flugplätze ' + country + ' von OpenAIP…');
+      OpenAIP.fetchAirports(key, country).then(function (list) {
+        var s2 = Store.getSettings();
+        var custom = s2.customAirports.slice();
+        var known = {};
+        custom.forEach(function (a) { known[a.icao] = true; });
+        var added = 0;
+        list.forEach(function (a) {
+          if (a.icao && !known[a.icao]) { custom.push(a); known[a.icao] = true; added++; }
+        });
+        Store.saveSettings({ customAirports: custom });
+        toast(added + ' neue Flugplätze (' + list.length + ' gesamt von OpenAIP ' + country + ')');
+      }).catch(function (err) { toast('OpenAIP Fehler: ' + err.message); });
+    };
+    $('#oa-airspaces').onclick = function () {
+      var key = $('#oa-key').value.trim();
+      if (!key) { toast('Bitte OpenAIP API-Key eintragen'); return; }
+      Store.saveSettings({ openaipKey: key });
+      var country = $('#oa-country').value;
+      toast('Lade Luftraum ' + country + ' von OpenAIP…');
+      OpenAIP.fetchAirspaces(key, country).then(function (list) {
+        var have = {};
+        Airspace.areas.forEach(function (a) { have[a.name] = true; });
+        var added = 0;
+        list.forEach(function (a) { if (!have[a.name]) { Airspace.areas.push(a); have[a.name] = true; added++; } });
+        Airspace.save();
+        toast(added + ' neue Gebiete (gesamt ' + Airspace.areas.length + ')');
+        renderDaten();
+      }).catch(function (err) { toast('OpenAIP Fehler: ' + err.message); });
+    };
     $$('#view-daten [data-cdel]').forEach(function (b) {
       b.onclick = function () {
         var c = Store.getSettings().customAirports.slice();
@@ -904,6 +1086,10 @@
     }
   });
   window.addEventListener('hashchange', route);
+  document.addEventListener('fullscreenchange', function () {
+    mapFullscreen = !!document.fullscreenElement;
+    if (recorder.active) renderLiveCharts();
+  });
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('sw.js').catch(function () {});

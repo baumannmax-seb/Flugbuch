@@ -12,6 +12,8 @@ var SHELL = [
   './js/simdemo.js',
   './js/airspace.js',
   './js/basemap.js',
+  './js/tiles.js',
+  './js/openaip.js',
   './js/app.js',
   './manifest.webmanifest'
 ];
