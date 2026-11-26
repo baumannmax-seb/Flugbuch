@@ -76,3 +76,11 @@ sw.js, manifest.webmanifest   PWA/Offline
 - **Eigene Kacheln laden** (Daten → Karten-Kacheln): entweder einen **Kachel-Ordner** (`…/z/x/y.png`, per Ordner-Picker) oder eine **MBTiles-Datei** (SQLite; TMS-Zeilen werden korrekt nach XYZ umgerechnet). MBTiles braucht einmalig Internet (sql.js-WASM von CDN). Kacheln landen in der IndexedDB des Geräts und sind danach **offline** nutzbar.
 - Kachel-Quelle: `auto` (lokal zuerst, OSM online als Fallback), `local` (nur offline), `osm` (nur online).
 - **OpenAIP**: API-Key unter Daten → OpenAIP lokal speichern (bleibt im Browser des Geräts). „Flugplätze laden“ merged OpenAIP-Airports in die eigenen Plätze (ICAO-Autoerkennung), „Luftraum laden“ merged OpenAIP-Airspaces (GeoJSON → Polygone, FL/ft-Grenzen) mit den DAeC-Daten. Endpunkte: `api.core.openaip.net/api/airports`, `/api/airspaces?country=DE`, Key via Header `x-openaip-api-key`. Datenquelle: openaip.net.
+
+## Flugmodus (Vollbild-Moving-Map + Instrumente)
+
+- Während der Aufzeichnung: **🧭 Flugmodus** auf der Live-Karte → Vollbild-Moving-Map mit Instrumenten-Overlay:
+  **km/h, Höhe MSL + AGL, HDG, Vario (m/s), Flugzeit, Distanz, T&G, LDG** sowie Luftraum-Warnbanner.
+- **Zoom +/−** (Z8–Z17, gespeichert), **N↑/HDG↑**-Umschaltung (Kartenrotation; im HDG-up zeigt der Kompass oben die Nordrichtung), **✕** oder ESC beendet.
+- Karte folgt dem Flugzeug, eigener Kurs-Pfeil, Maßstab, Track, T&G-/Landungs-Markierungen, Luftraumgebiete, Kacheln (lokal/offline oder OSM online).
+- Bildschirm bleibt dank Wake-Lock an.

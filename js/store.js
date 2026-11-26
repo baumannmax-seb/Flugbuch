@@ -52,6 +52,7 @@
     basemap: true,
     tileSource: 'auto',
     mmZoom: 13,
+    mmRotate: 'north',
     openaipKey: ''
   }, load(K.settings, {}));
   var seq = load(K.seq, 1);

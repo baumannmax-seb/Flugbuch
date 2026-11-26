@@ -17,6 +17,7 @@
     var n = Math.PI - 2 * Math.PI * y / Math.pow(2, z);
     return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
   }
+  function mercYDeg(lat) { return 180 / Math.PI * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360)); }
 
   function chooseZoom(w, spanLonDeg) {
     var z = Math.round(Math.log2(360 * w / (256 * Math.max(spanLonDeg, 1e-6))));
@@ -25,19 +26,17 @@
 
   function rangeFor(view, z) {
     var n = Math.pow(2, z);
-    var x0 = Math.max(0, Math.floor(lon2x(view.minLon - 0.002, z)));
-    var x1 = Math.min(n - 1, Math.floor(lon2x(view.maxLon + 0.002, z)));
-    var y0 = Math.max(0, Math.floor(lat2y(view.maxLat + 0.002, z)));
-    var y1 = Math.min(n - 1, Math.floor(lat2y(view.minLat - 0.002, z)));
+    var x0 = Math.max(0, Math.floor(lon2x(view.minLon, z)));
+    var x1 = Math.min(n - 1, Math.floor(lon2x(view.maxLon, z)));
+    var y0 = Math.max(0, Math.floor(lat2y(view.maxLat, z)));
+    var y1 = Math.min(n - 1, Math.floor(lat2y(view.minLat, z)));
     var out = [];
     for (var tx = x0; tx <= x1; tx++) {
       for (var ty = y0; ty <= y1; ty++) {
         out.push({
           key: z + '/' + tx + '/' + ty,
-          rect: {
-            x0: view.X(x2lon(tx, z)), y0: view.Y(y2lat(ty, z)),
-            x1: view.X(x2lon(tx + 1, z)), y1: view.Y(y2lat(ty + 1, z))
-          }
+          lonA: x2lon(tx, z), lonB: x2lon(tx + 1, z),
+          latA: y2lat(ty, z), latB: y2lat(ty + 1, z)
         });
       }
     }
@@ -56,9 +55,16 @@
     });
   }
 
-  function paintRect(ctx, img, rect) {
+  function paintTile(ctx, view, img, t) {
     if (!img) return false;
-    ctx.drawImage(img, rect.x0, rect.y0, rect.x1 - rect.x0, rect.y1 - rect.y0);
+    var wpx = view.s * (t.lonB - t.lonA);
+    var hpx = view.s * (mercYDeg(t.latA) - mercYDeg(t.latB));
+    var c = view.P((t.lonA + t.lonB) / 2, (t.latA + t.latB) / 2);
+    ctx.save();
+    ctx.translate(c.x, c.y);
+    if (view.rot) ctx.rotate(view.rot);
+    ctx.drawImage(img, -wpx / 2, -hpx / 2, wpx, hpx);
+    ctx.restore();
     return true;
   }
 
@@ -84,7 +90,7 @@
         tiles.forEach(function (t) {
           if (local[t.key]) {
             jobs.push(blobToImg(local[t.key]).then(function (img) {
-              if (paintRect(ctx, img, t.rect)) anyLocal = true;
+              if (paintTile(ctx, view, img, t)) anyLocal = true;
             }));
           }
         });
@@ -109,7 +115,7 @@
         im.crossOrigin = 'anonymous';
         im.onload = function () {
           memCache[t.key] = im;
-          paintRect(ctx, im, t.rect);
+          paintTile(ctx, view, im, t);
           attribution(ctx, view);
           if (opts.onLoaded) opts.onLoaded();
         };
@@ -119,7 +125,7 @@
           .replace('{x}', t.key.split('/')[1])
           .replace('{y}', t.key.split('/')[2]);
       } else if (img) {
-        paintRect(ctx, img, t.rect);
+        paintTile(ctx, view, img, t);
         attribution(ctx, view);
       }
     });
@@ -129,6 +135,7 @@
     draw: draw,
     chooseZoom: chooseZoom,
     rangeFor: rangeFor,
+    mercYDeg: mercYDeg,
     lon2x: lon2x, lat2y: lat2y, x2lon: x2lon, y2lat: y2lat
   };
 });

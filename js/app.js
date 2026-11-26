@@ -31,6 +31,7 @@
   var demoTimer = null;
   var lastAirKey = '';
   var mapFullscreen = false;
+  var lastVario = 0;
   Airspace.load();
   function startLiveTick() {
     stopLiveTick();
@@ -186,10 +187,26 @@
       '<button class="btn secondary" id="btn-discard">Verwerfen</button>' +
       '</div></div>' +
       '<div class="card"><div class="row"><h2 class="grow">Live-Karte</h2>' +
-      '<button class="btn small secondary" id="btn-zoom-out" title="Zoom raus">−</button>' +
-      '<button class="btn small secondary" id="btn-zoom-in" title="Zoom rein">+</button>' +
-      '<button class="btn small secondary" id="btn-fs" title="Vollbild / Moving Map">⛶ Vollbild</button></div>' +
-      '<div class="mapwrap" id="live-mapwrap"><canvas id="live-map" class="chart" style="height:280px"></canvas></div></div>' +
+      '<button class="btn small secondary" id="btn-fs" title="Flugmodus: Vollbild-Moving-Map mit Instrumenten">🧭 Flugmodus</button></div>' +
+      '<div class="mapwrap" id="live-mapwrap"><canvas id="live-map" class="chart" style="height:280px"></canvas>' +
+      '<div class="instruments" id="instruments">' +
+      '<div class="ins-top"><span id="im-air" class="ins-air"></span>' +
+      '<div class="ins-btns">' +
+      '<button class="ins-btn" id="btn-rot" title="Kartenrotation Nord/HDG">N↑</button>' +
+      '<button class="ins-btn" id="btn-zoom-out" title="Zoom raus">−</button>' +
+      '<button class="ins-btn" id="btn-zoom-in" title="Zoom rein">+</button>' +
+      '<button class="ins-btn" id="btn-exit" title="Vollbild beenden">✕</button>' +
+      '</div></div>' +
+      '<div class="ins-bottom">' +
+      '<div class="ins-cell big"><div class="ins-v" id="im-speed">0</div><div class="ins-l">km/h</div></div>' +
+      '<div class="ins-cell big"><div class="ins-v" id="im-alt">0</div><div class="ins-l">m MSL · <span id="im-agl">0</span> AGL</div></div>' +
+      '<div class="ins-cell"><div class="ins-v" id="im-hdg">···</div><div class="ins-l">HDG</div></div>' +
+      '<div class="ins-cell"><div class="ins-v" id="im-vario">0.0</div><div class="ins-l">m/s Vario</div></div>' +
+      '<div class="ins-cell"><div class="ins-v mono" id="im-time">00:00</div><div class="ins-l">Flugzeit</div></div>' +
+      '<div class="ins-cell"><div class="ins-v mono" id="im-dist">0.0</div><div class="ins-l">km</div></div>' +
+      '<div class="ins-cell"><div class="ins-v tg" id="im-tg">0</div><div class="ins-l">T&amp;G</div></div>' +
+      '<div class="ins-cell"><div class="ins-v ldg" id="im-ldg">0</div><div class="ins-l">LDG</div></div>' +
+      '</div></div></div></div>' +
       '<div class="card"><h2>Höhen- &amp; Geschwindigkeitsprofil</h2><canvas id="live-profile" class="chart" style="height:180px"></canvas></div>' +
       '<div class="card"><h2>Ereignisse</h2><ul class="events" id="live-events"></ul></div>';
   }
@@ -216,6 +233,24 @@
     if (st) st.textContent = recorder.det.state === 'CANDIDATE' ? 'Aufsetzen erkannt…' : (recorder.det.flightStarted ? 'in der Luft' : 'am Boden / rollend');
     var ul = el('live-events');
     if (ul) ul.innerHTML = evs.slice().reverse().map(eventLiHtml).join('');
+    if (el('im-speed')) el('im-speed').textContent = last && last.speed != null ? Math.round(Util.kmh(last.speed)) : '—';
+    if (el('im-alt')) el('im-alt').textContent = last && last.alt != null ? Math.round(last.alt) : '—';
+    if (el('im-hdg')) el('im-hdg').textContent = last && last.heading != null ? String(Math.round(last.heading)).padStart(3, '0') + '°' : '···';
+    var minAlt = null;
+    for (var q = 0; q < pts.length; q++) { if (pts[q].alt != null && (minAlt === null || pts[q].alt < minAlt)) minAlt = pts[q].alt; }
+    if (el('im-agl')) el('im-agl').textContent = (last && last.alt != null && minAlt != null) ? Math.max(0, Math.round(last.alt - minAlt)) : '—';
+    var vario = 0;
+    if (last && last.alt != null && pts.length > 1) {
+      var ref = null;
+      for (var r = pts.length - 1; r >= 0; r--) { if (pts[r].t <= last.t - 4000) { ref = pts[r]; break; } }
+      if (ref && ref.alt != null) { var dtv = (last.t - ref.t) / 1000; if (dtv > 0) vario = (last.alt - ref.alt) / dtv; }
+    }
+    lastVario = lastVario * 0.6 + vario * 0.4;
+    if (el('im-vario')) el('im-vario').textContent = (lastVario >= 0 ? '+' : '') + lastVario.toFixed(1);
+    if (el('im-time')) { var lt2 = last ? last.t : t0; el('im-time').textContent = Util.fmtDur(Math.max(0, (lt2 - t0) / 1000)); }
+    if (el('im-dist')) el('im-dist').textContent = (dist / 1000).toFixed(1);
+    if (el('im-tg')) el('im-tg').textContent = s.touchAndGos + recorder.manualTg;
+    if (el('im-ldg')) el('im-ldg').textContent = s.landings;
   }
   function altLabel(a) {
     var al = a.al == null ? 0 : Math.round(a.al);
@@ -234,6 +269,8 @@
         el.className = Airspace.warnLevel(top.cls) >= 3 ? 'as-warn strong' : 'as-warn';
       } else { el.textContent = ''; el.className = 'hint'; }
     }
+    var ia = document.getElementById('im-air');
+    if (ia) ia.textContent = top ? ('⚠ ' + top.name + ' (' + top.cls + ')') : '';
     var key = top ? top.cls + ':' + top.name : '';
     if (key !== lastAirKey) {
       lastAirKey = key;
@@ -269,6 +306,18 @@
     var zo = document.getElementById('btn-zoom-out');
     if (zi) zi.onclick = function () { bumpZoom(1); };
     if (zo) zo.onclick = function () { bumpZoom(-1); };
+    var rot = document.getElementById('btn-rot');
+    if (rot) rot.onclick = function () {
+      var s = Store.getSettings();
+      var next = (s.mmRotate === 'hdg') ? 'north' : 'hdg';
+      Store.saveSettings({ mmRotate: next });
+      rot.textContent = next === 'hdg' ? 'HDG↑' : 'N↑';
+      renderLiveCharts();
+    };
+    var rot0 = document.getElementById('btn-rot');
+    if (rot0) rot0.textContent = (Store.getSettings().mmRotate === 'hdg') ? 'HDG↑' : 'N↑';
+    var ex = document.getElementById('btn-exit');
+    if (ex) ex.onclick = function () { if (document.fullscreenElement) document.exitFullscreen(); };
   }
   function bumpZoom(d) {
     var s = Store.getSettings();
@@ -300,8 +349,8 @@
       var col = classColor(a.cls);
       ctx.beginPath();
       for (var k = 0; k < ring.length; k++) {
-        var x = view.X(ring[k].lon), y = view.Y(ring[k].lat);
-        if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+        var pp = view.P(ring[k].lon, ring[k].lat);
+        if (k) ctx.lineTo(pp.x, pp.y); else ctx.moveTo(pp.x, pp.y);
       }
       ctx.closePath();
       ctx.fillStyle = 'rgba(' + col + ',.10)';
@@ -314,7 +363,8 @@
       var cx = 0, cy = 0;
       for (var m = 0; m < ring.length; m++) { cx += ring[m].lon; cy += ring[m].lat; }
       cx /= ring.length; cy /= ring.length;
-      var lx = view.X(cx), ly = view.Y(cy);
+      var lp = view.P(cx, cy);
+      var lx = lp.x, ly = lp.y;
       if (lx > 4 && lx < view.w - 4 && ly > 10 && ly < view.h - 4) {
         ctx.font = '10px sans-serif';
         ctx.fillStyle = 'rgba(' + col + ',.95)';
@@ -348,7 +398,7 @@
     var oy = h / 2 + s * (mercY(minLat) + mercY(maxLat)) / 2;
     var X = function (lon) { return ox + s * lon; };
     var Y = function (lat) { return oy - s * mercY(lat); };
-    var view = { X: X, Y: Y, w: w, h: h, minLon: minLon, maxLon: maxLon, minLat: minLat, maxLat: maxLat };
+    var view = { X: X, Y: Y, P: function (lon, lat) { return { x: X(lon), y: Y(lat) }; }, s: s, rot: 0, w: w, h: h, minLon: minLon, maxLon: maxLon, minLat: minLat, maxLat: maxLat };
     var st = Store.getSettings();
     if (st.basemap && window.Basemap) {
       Basemap.draw(ctx, view, {
@@ -407,11 +457,18 @@
     var s = (w / 2) / halfLonDeg;
     var ox = w / 2 - s * c.lon;
     var oy = h / 2 + s * mercY(c.lat);
-    var X = function (lon) { return ox + s * lon; };
-    var Y = function (lat) { return oy - s * mercY(lat); };
-    var minLon = c.lon - halfLonDeg, maxLon = c.lon + halfLonDeg;
-    var minLat = invMercY((oy - h) / s), maxLat = invMercY(oy / s);
-    var view = { X: X, Y: Y, w: w, h: h, minLon: minLon, maxLon: maxLon, minLat: minLat, maxLat: maxLat, zoom: z };
+    var rot = (st.mmRotate === 'hdg' && c.heading != null) ? -c.heading * Math.PI / 180 : 0;
+    var cx = w / 2, cy = h / 2, cosR = Math.cos(rot), sinR = Math.sin(rot);
+    function P(lon, lat) {
+      var x = ox + s * lon - cx, y = oy - s * mercY(lat) - cy;
+      return { x: cx + x * cosR - y * sinR, y: cy + x * sinR + y * cosR };
+    }
+    var ex = 1.7;
+    var view = {
+      P: P, s: s, rot: rot, w: w, h: h, zoom: z,
+      minLon: c.lon - halfLonDeg * ex, maxLon: c.lon + halfLonDeg * ex,
+      minLat: invMercY((oy - h * ex) / s), maxLat: invMercY((oy + h * ex) / s)
+    };
     if (st.basemap && window.Basemap) {
       Basemap.draw(ctx, view, {
         source: st.tileSource || 'auto',
@@ -427,18 +484,22 @@
     if (st.airspaceMap && Airspace.areas.length) drawAirspace(ctx, view);
     if (pts && pts.length > 1) {
       ctx.beginPath();
-      pts.forEach(function (p, i) { if (i) ctx.lineTo(X(p.lon), Y(p.lat)); else ctx.moveTo(X(p.lon), Y(p.lat)); });
+      pts.forEach(function (p, i) {
+        var pp = P(p.lon, p.lat);
+        if (i) ctx.lineTo(pp.x, pp.y); else ctx.moveTo(pp.x, pp.y);
+      });
       ctx.strokeStyle = '#4da3ff'; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
     }
     (events || []).forEach(function (e) {
       if (e.lat == null) return;
-      if (e.type === 'touchandgo') dot(ctx, X(e.lon), Y(e.lat), '#ffb020');
-      else if (e.type === 'landing') square(ctx, X(e.lon), Y(e.lat), '#3ddc84');
+      var ep = P(e.lon, e.lat);
+      if (e.type === 'touchandgo') dot(ctx, ep.x, ep.y, '#ffb020');
+      else if (e.type === 'landing') square(ctx, ep.x, ep.y, '#3ddc84');
     });
-    var hdg = c.heading != null ? c.heading * Math.PI / 180 : 0;
+    var me = P(c.lon, c.lat);
     ctx.save();
-    ctx.translate(X(c.lon), Y(c.lat));
-    ctx.rotate(hdg);
+    ctx.translate(me.x, me.y);
+    ctx.rotate(rot !== 0 ? 0 : (c.heading != null ? c.heading * Math.PI / 180 : 0));
     ctx.beginPath();
     ctx.moveTo(0, -11); ctx.lineTo(7, 8); ctx.lineTo(0, 4); ctx.lineTo(-7, 8);
     ctx.closePath();
@@ -455,7 +516,20 @@
     ctx.fillStyle = '#e8eef7'; ctx.font = '11px sans-serif';
     ctx.fillText(barM >= 1000 ? (barM / 1000) + ' km' : barM + ' m', 14, h - 22);
     ctx.fillText('Z' + z, w - 34, h - 8);
-    ctx.fillText('N ↑', w - 22, 18);
+    if (rot !== 0) {
+      ctx.save();
+      ctx.translate(w - 26, 26);
+      ctx.rotate(rot);
+      ctx.strokeStyle = '#e8eef7'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(0, 8); ctx.lineTo(0, -8); ctx.stroke();
+      ctx.fillStyle = '#e8eef7'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('N', 0, -12);
+      ctx.restore();
+      ctx.textAlign = 'left';
+    } else {
+      ctx.fillStyle = '#8fa1bd'; ctx.font = '12px sans-serif';
+      ctx.fillText('N ↑', w - 22, 18);
+    }
   }
   function marker(ctx, x, y, color, label) {
     ctx.fillStyle = color;
